@@ -20,32 +20,47 @@ struct Args {
 async fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    let listen_sock = UdpSocket::bind(args.listen_address)
-        .await
-        .expect("Error creating socket");
-
-    let r = Arc::new(listen_sock);
-
     // TODO: Better error handling
     let speak_addresses = args.speak_addresses.expect("Wrong speak_addresses config");
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
 
-    speak_addresses.iter().for_each(|&speak_addr| {
+    // speak_addresses.iter().for_each(|&speak_addr| {
+    for speak_addr in speak_addresses {
+        let tx = tx.clone();
         let mut rx = tx.subscribe();
-        let r = r.clone();
+
+        println!("Addr: {:?}", speak_addr);
+        let sock = UdpSocket::bind(speak_addr)
+            .await
+            .expect("Error creating socket");
+
+        let listen_sock = Arc::new(sock);
+        let speak_sock = listen_sock.clone();
+
+        let mut buf: [u8; 1024] = [0; 1024];
+
+        tokio::spawn(async move {
+            loop {
+
+                let (len, source_addr) = listen_sock.recv_from(&mut buf).await.unwrap();
+                // TODO: better comment
+                // Avoid packet storms!
+                if source_addr == SocketAddr::V4(speak_addr) {
+                    continue;
+                }
+                tx.send((buf[..len].to_vec(), source_addr)).unwrap();
+            }
+        });
+
         tokio::spawn(async move {
             loop {
                 let (foo, _) = rx.recv().await.unwrap();
-                r.send_to(&foo, speak_addr.clone()).await.unwrap();
+                speak_sock.send_to(&foo, speak_addr.clone()).await.unwrap();
             }
         });
-    });
+    };
+    // });
 
-    let mut buf: [u8; 1024] = [0; 1024];
-
-    loop {
-        let (len, addr) = r.recv_from(&mut buf).await?;
-        tx.send((buf[..len].to_vec(), addr)).unwrap();
-    }
+    loop {}
 }
