@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
+
+use clap::Parser;
 
 use tokio::io;
 use tokio::net::UdpSocket;
-
-use clap::{ArgAction, Parser};
-use tokio::sync::{mpsc, broadcast};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::broadcast;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,17 +17,17 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> io::Result<()>{
+async fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    let listen_sock = UdpSocket::bind(args.listen_address).await
+    let listen_sock = UdpSocket::bind(args.listen_address)
+        .await
         .expect("Error creating socket");
 
     let r = Arc::new(listen_sock);
 
     // TODO: Better error handling
-    let speak_addresses = args.speak_addresses
-        .expect("Wrong speak_addresses config");
+    let speak_addresses = args.speak_addresses.expect("Wrong speak_addresses config");
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
 
