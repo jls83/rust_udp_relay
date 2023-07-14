@@ -3,11 +3,6 @@ use std::net::{UdpSocket, Ipv4Addr, SocketAddrV4};
 
 use clap::{ArgAction, Parser};
 
-// fn create_socket(listen_address: &str, listen_port: i32) -> io::Result<UdpSocket> {
-fn create_socket(listen_address: SocketAddrV4) -> io::Result<UdpSocket> {
-    UdpSocket::bind(listen_address)
-}
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -20,7 +15,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let listen_sock = match create_socket(args.listen_address) {
+    let listen_sock = match UdpSocket::bind(args.listen_address) {
         Ok(listen_sock) => listen_sock,
         Err(_) => panic!("Error creating socket"),
     };
