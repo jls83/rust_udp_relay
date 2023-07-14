@@ -11,26 +11,24 @@ fn create_socket(listen_address: SocketAddrV4) -> io::Result<UdpSocket> {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    // TODO: Ipv4Addr, Port separate
     listen_address: SocketAddrV4,
-    speak_address: SocketAddrV4,
-    // NOTE: Handle the "num_args" downstream OR figure out the `Append` junk.
     #[arg(short, long, value_delimiter = ',')]
-    other_stuff: Option<Vec<SocketAddrV4>>,
-    // listen_port: u16,
-    // speak_port: u16,
+    speak_addresses: Option<Vec<SocketAddrV4>>,
 }
 
 fn main() {
     let args = Args::parse();
 
-    println!("{:?}", args.other_stuff);
-
-    // let listen_address = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), args.listen_port);
-    // let speak_address = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), args.speak_port);
-
     let listen_sock = match create_socket(args.listen_address) {
         Ok(listen_sock) => listen_sock,
         Err(_) => panic!("Error creating socket"),
+    };
+
+    let speak_addresses = match args.speak_addresses {
+        Some(speak_addresses) => speak_addresses,
+        // TODO: Better error handling
+        None => panic!("Wrong speak_addresses config"),
     };
 
     loop {
@@ -42,8 +40,10 @@ fn main() {
 
         println!("{}", String::from_utf8((&buf).to_vec()).unwrap());
 
-        listen_sock
-            .send_to(&buf, args.speak_address)
-            .expect("Send to port failed");
+        speak_addresses.iter().for_each(|speak_address| {
+            listen_sock
+                .send_to(&buf, speak_address)
+                .expect("Send to port failed");
+        });
     }
 }
