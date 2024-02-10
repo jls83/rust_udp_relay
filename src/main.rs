@@ -10,6 +10,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
 const DATAGRAM_SIZE: usize = 65_535;
+const TRANSMIT_PORT: u16 = 58371;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -70,6 +71,7 @@ async fn main() -> io::Result<()> {
         .expect("Wrong transmit interfaces config");
 
     let receive_addresses = get_socket_addresses(receive_interfaces, &interface_map, port);
+    // TODO: read in transmit ports as well
     let transmit_addresses = get_socket_addresses(transmit_interfaces, &interface_map, port + 1);
 
     if receive_addresses.len() == 0 {
@@ -82,15 +84,6 @@ async fn main() -> io::Result<()> {
     let transmit_addresses_set = Arc::new(transmit_addresses_set);
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
-
-    let transmit_sock_inner =
-        UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 58371))
-            .await
-            .expect("Could not bind transmit socket");
-
-    println!("Transmit Socket: {:?}", transmit_sock_inner);
-
-    let transmit_sock = Arc::new(transmit_sock_inner);
 
     // listening
     for receive_address in receive_addresses {
@@ -125,25 +118,30 @@ async fn main() -> io::Result<()> {
         });
     }
 
-    for transmit_address in transmit_addresses {
-        let mut rx = tx.subscribe();
+    let mut rx = tx.subscribe();
 
-        println!("Addr: {:?}", transmit_address);
+    let transmit_sock_inner = UdpSocket::bind(SocketAddrV4::new(
+        Ipv4Addr::new(127, 0, 0, 1),
+        TRANSMIT_PORT,
+    ))
+    .await
+    .expect("Could not bind transmit socket");
 
-        let transmit_sock = transmit_sock.clone();
+    println!("Transmit Socket: {:?}", transmit_sock_inner);
 
-        tokio::spawn(async move {
-            while let Ok((buf, _source_addr)) = rx.recv().await {
-                println!("Sending to {:?}", transmit_address);
-                let r = transmit_sock.send_to(&buf, transmit_address.clone()).await;
+    let transmit_sock = Arc::new(transmit_sock_inner);
 
-                match r {
-                    Ok(n) => println!("Sent {n} bytes"),
-                    Err(_) => println!("Failed"),
-                };
-            }
-        });
+    while let Ok((buf, _source_addr)) = rx.recv().await {
+        for transmit_address in transmit_addresses.as_slice() {
+            println!("Sending to {:?}", transmit_address);
+            let r = transmit_sock.send_to(&buf, &transmit_address).await;
+
+            match r {
+                Ok(n) => println!("Sent {n} bytes"),
+                Err(_) => println!("Failed"),
+            };
+        }
     }
 
-    loop {}
+    Ok(())
 }
