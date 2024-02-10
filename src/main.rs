@@ -106,19 +106,21 @@ async fn main() -> io::Result<()> {
         let transmit_addresses_set = transmit_addresses_set.clone();
 
         tokio::spawn(async move {
-            let mut buf: [u8; DATAGRAM_SIZE] = [0; DATAGRAM_SIZE];
-            let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
-            println!("Got {} bytes from {:?}", len, source_addr);
-            // TODO: better comment
-            // Avoid packet storms!
+            loop {
+                let mut buf: [u8; DATAGRAM_SIZE] = [0; DATAGRAM_SIZE];
+                let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
+                println!("Got {} bytes from {:?}", len, source_addr);
+                // TODO: better comment
+                // Avoid packet storms!
 
-            let should_transmit = match source_addr {
-                SocketAddr::V4(inner) => !transmit_addresses_set.contains(&inner),
-                _ => true,
-            };
+                let should_transmit = match source_addr {
+                    SocketAddr::V4(inner) => !transmit_addresses_set.contains(&inner),
+                    _ => true,
+                };
 
-            if should_transmit {
-                tx.send((buf[..len].to_vec(), source_addr)).unwrap();
+                if should_transmit {
+                    tx.send((buf[..len].to_vec(), source_addr)).unwrap();
+                }
             }
         });
     }
@@ -131,14 +133,15 @@ async fn main() -> io::Result<()> {
         let transmit_sock = transmit_sock.clone();
 
         tokio::spawn(async move {
-            let (buf, _source_addr) = rx.recv().await.unwrap();
-            println!("Sending to {:?}", transmit_address);
-            let r = transmit_sock.send_to(&buf, transmit_address.clone()).await;
+            while let Ok((buf, _source_addr)) = rx.recv().await {
+                println!("Sending to {:?}", transmit_address);
+                let r = transmit_sock.send_to(&buf, transmit_address.clone()).await;
 
-            match r {
-                Ok(n) => println!("Sent {n} bytes"),
-                Err(_) => println!("Failed"),
-            };
+                match r {
+                    Ok(n) => println!("Sent {n} bytes"),
+                    Err(_) => println!("Failed"),
+                };
+            }
         });
     }
 
