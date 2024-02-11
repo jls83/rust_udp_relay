@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::process;
 use std::sync::Arc;
 
 use env_logger::Env;
@@ -37,22 +38,21 @@ fn get_interface_map() -> HashMap<String, NetworkInterface> {
 }
 
 fn get_socket_addresses(
-    interfaces: Vec<String>,
+    interfaces: &Vec<String>,
     interface_map: &HashMap<String, NetworkInterface>,
     port: u16,
 ) -> Vec<SocketAddrV4> {
     interfaces
         .iter()
-        .flat_map(|interface_name| {
-            interface_map
-                .get(interface_name)
-                .unwrap()
-                .addr
-                .iter()
-                .filter_map(|x| match x {
-                    Addr::V4(s) => Some(SocketAddrV4::new(s.ip, port)),
-                    _ => None,
-                })
+        .filter_map(|interface_name| match interface_map.get(interface_name) {
+            Some(NetworkInterface { addr, .. }) => Some(addr),
+            None => None,
+        })
+        .flat_map(|addrs| {
+            addrs.iter().filter_map(|addr| match addr {
+                Addr::V4(addr) => Some(SocketAddrV4::new(addr.ip, port)),
+                _ => None,
+            })
         })
         .collect()
 }
@@ -85,18 +85,24 @@ async fn main() -> io::Result<()> {
         .transmit_interfaces
         .expect("Wrong transmit interfaces config");
 
-    let receive_addresses = get_socket_addresses(receive_interfaces, &interface_map, port);
+    let receive_addresses = get_socket_addresses(&receive_interfaces, &interface_map, port);
     // TODO: read in transmit ports as well
-    let transmit_addresses = get_socket_addresses(transmit_interfaces, &interface_map, port + 1);
+    let transmit_addresses = get_socket_addresses(&transmit_interfaces, &interface_map, port + 1);
 
     if receive_addresses.len() == 0 {
-        // TODO: error, exit code 1
-        panic!("No interfaces to listen on");
+        error!(
+            "No interfaces to receive from. Tried {:?}",
+            &receive_interfaces
+        );
+        process::exit(1);
     }
 
     if transmit_addresses.len() == 0 {
-        // TODO: error, exit code 1
-        panic!("No interfaces to transmit to");
+        error!(
+            "No interfaces to transmit to. Tried {:?}",
+            &transmit_interfaces
+        );
+        process::exit(1);
     }
 
     debug!("Receiving from {} interfaces", receive_addresses.len());
@@ -130,13 +136,13 @@ async fn main() -> io::Result<()> {
                 // TODO: better comment
                 // Avoid packet storms!
 
-                let should_transmit = match source_addr {
-                    SocketAddr::V4(inner) => !transmit_addresses_set.contains(&inner),
-                    _ => true,
-                };
-
-                if should_transmit {
-                    tx.send((buf[..len].to_vec(), source_addr)).unwrap();
+                if let SocketAddr::V4(inner) = source_addr {
+                    if !transmit_addresses_set.contains(&inner) {
+                        match tx.send((buf[..len].to_vec(), source_addr)) {
+                            Ok(_) => trace!("Added packet to channel"),
+                            Err(_) => warn!("Error adding packet to channel"),
+                        }
+                    }
                 } else {
                     trace!("Ignoring packet from {}", source_addr);
                 }
