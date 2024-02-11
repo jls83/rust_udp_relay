@@ -111,6 +111,8 @@ async fn main() -> io::Result<()> {
     let transmit_addresses_set: HashSet<SocketAddrV4> =
         HashSet::from_iter(transmit_addresses.clone());
 
+    // TODO: CIDR filter here
+
     let transmit_addresses_set = Arc::new(transmit_addresses_set);
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
@@ -119,10 +121,10 @@ async fn main() -> io::Result<()> {
     for receive_address in receive_addresses {
         let tx = tx.clone();
 
-        info!("Listening on {:?}", receive_address);
         let sock = UdpSocket::bind(receive_address)
             .await
             .expect("Error creating socket");
+        info!("Listening on {:?}", receive_address);
 
         let receive_sock = Arc::new(sock);
 
@@ -157,7 +159,6 @@ async fn main() -> io::Result<()> {
     let transmit_sock_inner = UdpSocket::bind(transmit_sock_addr)
         .await
         .expect("Could not bind transmit socket");
-
     info!("Transmitting on {:?}", transmit_sock_addr);
 
     let transmit_sock = Arc::new(transmit_sock_inner);
