@@ -18,13 +18,13 @@ const TRANSMIT_PORT: u16 = 58371;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(short, long, required = true)]
     port: Option<u16>,
 
-    #[arg(short, long, value_delimiter = ',')]
+    #[arg(short, long, value_delimiter = ',', required = true)]
     receive_interfaces: Option<Vec<String>>,
 
-    #[arg(short, long, value_delimiter = ',')]
+    #[arg(short, long, value_delimiter = ',', required = true)]
     transmit_interfaces: Option<Vec<String>>,
 }
 
@@ -76,9 +76,11 @@ async fn main() -> io::Result<()> {
     // TODO: Better error handling
 
     let port = args.port.expect("Wrong port config");
+
     let receive_interfaces = args
         .receive_interfaces
         .expect("Wrong receive interfaces config");
+
     let transmit_interfaces = args
         .transmit_interfaces
         .expect("Wrong transmit interfaces config");
