@@ -4,6 +4,7 @@ use std::process;
 use std::sync::Arc;
 
 use env_logger::Env;
+use ipnet::Ipv4Net;
 use log::{debug, error, info, trace, warn};
 
 use clap::Parser;
@@ -27,6 +28,12 @@ struct Args {
 
     #[arg(short, long, value_delimiter = ',', required = true)]
     transmit_interfaces: Option<Vec<String>>,
+
+    #[arg(long, value_delimiter = ',')]
+    block_addr: Option<Vec<Ipv4Net>>,
+
+    #[arg(long, value_delimiter = ',')]
+    allow_addr: Option<Vec<Ipv4Net>>,
 }
 
 fn get_interface_map() -> HashMap<String, NetworkInterface> {
@@ -55,6 +62,43 @@ fn get_socket_addresses(
             })
         })
         .collect()
+}
+
+struct AddressFilter {
+    transmit_addresses_set: HashSet<SocketAddrV4>,
+    block_nets: Vec<Ipv4Net>,
+    allow_nets: Vec<Ipv4Net>,
+}
+
+impl AddressFilter {
+    fn new(
+        transmit_addresses_set: HashSet<SocketAddrV4>,
+        block_nets: Vec<Ipv4Net>,
+        allow_nets: Vec<Ipv4Net>,
+    ) -> Self {
+        Self {
+            transmit_addresses_set,
+            block_nets,
+            allow_nets,
+        }
+    }
+
+    fn should_transmit(&self, socket_addr: &SocketAddrV4) -> bool {
+        let storm_check = self.transmit_addresses_set.contains(socket_addr);
+
+        let in_block_net = self
+            .block_nets
+            .iter()
+            .any(|net| net.contains(socket_addr.ip()));
+
+        let in_allow_net = self
+            .allow_nets
+            .iter()
+            .any(|net| net.contains(socket_addr.ip()));
+
+        // TODO: Check semantics of this.
+        !storm_check && (!in_block_net || in_allow_net)
+    }
 }
 
 #[tokio::main]
