@@ -30,10 +30,10 @@ struct Args {
     transmit_interfaces: Option<Vec<String>>,
 
     #[arg(long, value_delimiter = ',')]
-    block_addr: Option<Vec<Ipv4Net>>,
+    block_nets: Option<Vec<Ipv4Net>>,
 
     #[arg(long, value_delimiter = ',')]
-    allow_addr: Option<Vec<Ipv4Net>>,
+    allow_nets: Option<Vec<Ipv4Net>>,
 }
 
 fn get_interface_map() -> HashMap<String, NetworkInterface> {
@@ -76,6 +76,9 @@ impl AddressFilter {
         block_nets: Vec<Ipv4Net>,
         allow_nets: Vec<Ipv4Net>,
     ) -> Self {
+        // TODO: only log if non-zero?
+        debug!("Blocking packets from {} subnets", block_nets.len());
+        debug!("Allowing packets from {} subnets", allow_nets.len());
         Self {
             transmit_addresses_set,
             block_nets,
@@ -97,7 +100,11 @@ impl AddressFilter {
             .any(|net| net.contains(socket_addr.ip()));
 
         // TODO: Check semantics of this.
-        !storm_check && (!in_block_net || in_allow_net)
+        let res = !storm_check && (!in_block_net || in_allow_net);
+
+        trace!("Not transmitting packet from {:?}", socket_addr);
+
+        res
     }
 }
 
@@ -129,6 +136,16 @@ async fn main() -> io::Result<()> {
         .transmit_interfaces
         .expect("Wrong transmit interfaces config");
 
+    let block_nets = match args.block_nets {
+        Some(block_nets) => block_nets,
+        None => vec![],
+    };
+
+    let allow_nets = match args.allow_nets {
+        Some(allow_nets) => allow_nets,
+        None => vec![],
+    };
+
     let receive_addresses = get_socket_addresses(&receive_interfaces, &interface_map, port);
     // TODO: read in transmit ports as well
     let transmit_addresses = get_socket_addresses(&transmit_interfaces, &interface_map, port + 1);
@@ -155,9 +172,8 @@ async fn main() -> io::Result<()> {
     let transmit_addresses_set: HashSet<SocketAddrV4> =
         HashSet::from_iter(transmit_addresses.clone());
 
-    // TODO: CIDR filter here
-
-    let transmit_addresses_set = Arc::new(transmit_addresses_set);
+    let address_filter = AddressFilter::new(transmit_addresses_set, block_nets, allow_nets);
+    let address_filter = Arc::new(address_filter);
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
     trace!("Created broadcast channel");
@@ -172,7 +188,7 @@ async fn main() -> io::Result<()> {
 
         let receive_sock = Arc::new(sock);
 
-        let transmit_addresses_set = transmit_addresses_set.clone();
+        let address_filter = address_filter.clone();
 
         tokio::spawn(async move {
             loop {
@@ -183,7 +199,7 @@ async fn main() -> io::Result<()> {
                 // Avoid packet storms!
 
                 if let SocketAddr::V4(inner) = source_addr {
-                    if !transmit_addresses_set.contains(&inner) {
+                    if address_filter.should_transmit(&inner) {
                         match tx.send((buf[..len].to_vec(), source_addr)) {
                             Ok(_) => trace!("Added packet to channel"),
                             Err(_) => warn!("Error adding packet to channel"),
