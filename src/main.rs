@@ -196,15 +196,13 @@ async fn main() -> io::Result<()> {
                 let mut buf: [u8; DATAGRAM_SIZE] = [0; DATAGRAM_SIZE];
                 let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
                 debug!("Read {} bytes from {:?}", len, source_addr);
-                // TODO: better comment
-                // Avoid packet storms!
 
                 if let SocketAddr::V4(inner) = source_addr {
                     if address_filter.should_transmit(&inner) {
                         match tx.send((buf[..len].to_vec(), source_addr)) {
                             Ok(_) => trace!("Added packet to channel from {:?}", source_addr),
                             Err(_) => {
-                                warn!("Error adding packet to channel from {:?}", source_addr)
+                                warn!("Error adding packet to channel from {:?}", source_addr);
                             }
                         }
                     }
