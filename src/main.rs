@@ -110,6 +110,7 @@ impl AddressFilter {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    // TODO: better env var names
     let env = Env::default()
         .filter_or("MY_LOG_LEVEL", "trace")
         .write_style_or("MY_LOG_STYLE", "always");
@@ -201,12 +202,14 @@ async fn main() -> io::Result<()> {
                 if let SocketAddr::V4(inner) = source_addr {
                     if address_filter.should_transmit(&inner) {
                         match tx.send((buf[..len].to_vec(), source_addr)) {
-                            Ok(_) => trace!("Added packet to channel"),
-                            Err(_) => warn!("Error adding packet to channel"),
+                            Ok(_) => trace!("Added packet to channel from {:?}", source_addr),
+                            Err(_) => {
+                                warn!("Error adding packet to channel from {:?}", source_addr)
+                            }
                         }
                     }
                 } else {
-                    trace!("Ignoring packet from {}", source_addr);
+                    trace!("Ignoring non-IPv4 packet from {}", source_addr);
                 }
             }
         });
