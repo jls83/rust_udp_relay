@@ -192,8 +192,11 @@ async fn main() -> io::Result<()> {
                     if address_filter.should_transmit(&inner) {
                         match tx.send((buf[..len].to_vec(), source_addr)) {
                             Ok(_) => trace!("Added packet to channel from {:?}", source_addr),
-                            Err(_) => {
-                                warn!("Error adding packet to channel from {:?}", source_addr);
+                            Err(e) => {
+                                warn!(
+                                    "Error adding packet to channel from {:?} {:?}",
+                                    source_addr, e
+                                );
                             }
                         }
                     }
@@ -227,7 +230,7 @@ async fn main() -> io::Result<()> {
     //         tokio::spawn(async move {
     //             match transmit_sock.send_to(&buf, &transmit_address).await {
     //                 Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-    //                 Err(_) => error!("Failed"),
+    //                 Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
     //             };
     //         });
     //     }
