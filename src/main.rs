@@ -215,8 +215,7 @@ async fn main() -> io::Result<()> {
         });
     }
 
-    let mut rx = tx.subscribe();
-
+    // TODO: possible improvement - collection of open sockets?
     let transmit_sock_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), TRANSMIT_PORT);
 
     let transmit_sock = UdpSocket::bind(transmit_sock_addr)
@@ -226,21 +225,46 @@ async fn main() -> io::Result<()> {
 
     let transmit_sock = Arc::new(transmit_sock);
 
-    while let Ok((buf, _source_addr)) = rx.recv().await {
-        let buf = Arc::new(buf);
+    // // 1. Initial impl: single subscription
+    // let mut rx = tx.subscribe();
 
-        for transmit_address in transmit_addresses.iter().cloned() {
-            let transmit_sock = transmit_sock.clone();
-            let buf = buf.clone();
+    // while let Ok((buf, _source_addr)) = rx.recv().await {
+    //     let buf = Arc::new(buf);
 
-            tokio::spawn(async move {
+    //     for transmit_address in transmit_addresses.iter().cloned() {
+    //         let transmit_sock = transmit_sock.clone();
+    //         let buf = buf.clone();
+
+    //         tokio::spawn(async move {
+    //             match transmit_sock.send_to(&buf, &transmit_address).await {
+    //                 Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
+    //                 Err(_) => error!("Failed"),
+    //             };
+    //         });
+    //     }
+    // }
+
+    // 2. hmm
+    for transmit_address in transmit_addresses.iter().cloned() {
+        let mut rx = tx.subscribe();
+        let transmit_sock = transmit_sock.clone();
+
+        tokio::spawn(async move {
+            if let Ok((buf, _source_addr)) = rx.recv().await {
                 match transmit_sock.send_to(&buf, &transmit_address).await {
                     Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-                    Err(_) => error!("Failed"),
-                };
-            });
-        }
+                    Err(_) => error!("Send failed to {:?}", transmit_address),
+                }
+            } else {
+                // TODO: This isn't quite the correct error message.
+                error!("Receive failed for {:?}", transmit_address);
+            }
+        });
     }
 
-    Ok(())
+    // For version 1
+    // Ok(())
+
+    // For version 2
+    loop {}
 }
