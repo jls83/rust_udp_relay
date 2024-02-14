@@ -20,19 +20,19 @@ const TRANSMIT_PORT: u16 = 58371;
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[arg(short, long, required = true)]
-    port: Option<u16>,
+    port: u16,
 
     #[arg(short, long, value_delimiter = ',', required = true)]
-    receive_interfaces: Option<Vec<String>>,
+    receive_interfaces: Vec<String>,
 
     #[arg(short, long, value_delimiter = ',', required = true)]
-    transmit_interfaces: Option<Vec<String>>,
+    transmit_interfaces: Vec<String>,
 
     #[arg(long, value_delimiter = ',')]
-    block_nets: Option<Vec<Ipv4Net>>,
+    block_nets: Vec<Ipv4Net>,
 
     #[arg(long, value_delimiter = ',')]
-    allow_nets: Option<Vec<Ipv4Net>>,
+    allow_nets: Vec<Ipv4Net>,
 
     #[command(flatten)]
     verbose: clap_verbosity_flag::Verbosity,
@@ -128,34 +128,16 @@ async fn main() -> io::Result<()> {
 
     // TODO: Better error handling
 
-    let port = args.port.expect("Wrong port config");
-
-    let receive_interfaces = args
-        .receive_interfaces
-        .expect("Wrong receive interfaces config");
-
-    let transmit_interfaces = args
-        .transmit_interfaces
-        .expect("Wrong transmit interfaces config");
-
-    let block_nets = match args.block_nets {
-        Some(block_nets) => block_nets,
-        None => vec![],
-    };
-
-    let allow_nets = match args.allow_nets {
-        Some(allow_nets) => allow_nets,
-        None => vec![],
-    };
-
-    let receive_addresses = get_socket_addresses(&receive_interfaces, &interface_map, port);
+    let receive_addresses =
+        get_socket_addresses(&args.receive_interfaces, &interface_map, args.port);
     // TODO: read in transmit ports as well
-    let transmit_addresses = get_socket_addresses(&transmit_interfaces, &interface_map, port + 1);
+    let transmit_addresses =
+        get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port + 1);
 
     if receive_addresses.len() == 0 {
         error!(
             "No interfaces to receive from. Tried {:?}",
-            &receive_interfaces
+            &args.receive_interfaces
         );
         process::exit(1);
     }
@@ -163,7 +145,7 @@ async fn main() -> io::Result<()> {
     if transmit_addresses.len() == 0 {
         error!(
             "No interfaces to transmit to. Tried {:?}",
-            &transmit_interfaces
+            &args.transmit_interfaces
         );
         process::exit(1);
     }
@@ -174,7 +156,8 @@ async fn main() -> io::Result<()> {
     let transmit_addresses_set: HashSet<SocketAddrV4> =
         HashSet::from_iter(transmit_addresses.clone());
 
-    let address_filter = AddressFilter::new(transmit_addresses_set, block_nets, allow_nets);
+    let address_filter =
+        AddressFilter::new(transmit_addresses_set, args.block_nets, args.allow_nets);
     let address_filter = Arc::new(address_filter);
 
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
