@@ -207,6 +207,11 @@ async fn main() -> io::Result<()> {
         });
     }
 
+    // Set up outing packet transmitters. Here, we bind a single `UdpSocket` on
+    // localhost:TRANSMIT_PORT, then use the `send_to` method to sent to the apprpriate
+    // `transmit_address`. Note that the `rx` within the loop refers to the output-side
+    // of the `broadcast::channel` created above.
+    //
     // TODO: possible improvement - collection of open sockets?
     let transmit_sock_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), TRANSMIT_PORT);
 
@@ -236,7 +241,7 @@ async fn main() -> io::Result<()> {
     //     }
     // }
 
-    // 2. hmm
+    // 2. Second impl: multi-subscription, multi task
     for transmit_address in transmit_addresses.iter().cloned() {
         let mut rx = tx.subscribe();
         let transmit_sock = transmit_sock.clone();
