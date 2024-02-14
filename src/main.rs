@@ -13,7 +13,7 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
-const DATAGRAM_SIZE: usize = 65_535;
+const BUFFER_SIZE: usize = 1024;
 const TRANSMIT_PORT: u16 = 58371;
 
 #[derive(Parser, Debug)]
@@ -146,7 +146,7 @@ async fn main() -> io::Result<()> {
         };
 
     let transmit_addresses =
-        match get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port) {
+        match get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port + 1) {
             Some(addrs) => addrs,
             None => {
                 error!(
@@ -184,7 +184,7 @@ async fn main() -> io::Result<()> {
 
         tokio::spawn(async move {
             loop {
-                let mut buf: [u8; DATAGRAM_SIZE] = [0; DATAGRAM_SIZE];
+                let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
                 let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
                 debug!("Read {} bytes from {:?}", len, source_addr);
 
@@ -239,14 +239,17 @@ async fn main() -> io::Result<()> {
         let transmit_sock = transmit_sock.clone();
 
         tokio::spawn(async move {
-            if let Ok((buf, _source_addr)) = rx.recv().await {
-                match transmit_sock.send_to(&buf, &transmit_address).await {
-                    Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-                    Err(_) => error!("Send failed to {:?}", transmit_address),
+            loop {
+                if let Ok((buf, _source_addr)) = rx.recv().await {
+                    debug!("TODO: here");
+                    match transmit_sock.send_to(&buf, &transmit_address).await {
+                        Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
+                        Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
+                    }
+                } else {
+                    // TODO: This isn't quite the correct error message.
+                    error!("Receive failed for {:?}", transmit_address);
                 }
-            } else {
-                // TODO: This isn't quite the correct error message.
-                error!("Receive failed for {:?}", transmit_address);
             }
         });
     }
