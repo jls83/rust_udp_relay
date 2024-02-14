@@ -3,7 +3,6 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::process;
 use std::sync::Arc;
 
-use env_logger::Env;
 use ipnet::Ipv4Net;
 use log::{debug, error, info, trace, warn};
 
@@ -34,6 +33,9 @@ struct Args {
 
     #[arg(long, value_delimiter = ',')]
     allow_nets: Option<Vec<Ipv4Net>>,
+
+    #[command(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
 }
 
 fn get_interface_map() -> HashMap<String, NetworkInterface> {
@@ -112,20 +114,17 @@ impl AddressFilter {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    // TODO: better env var names
-    let env = Env::default()
-        .filter_or("MY_LOG_LEVEL", "trace")
-        .write_style_or("MY_LOG_STYLE", "always");
+    let args = Args::parse();
 
-    env_logger::init_from_env(env);
+    env_logger::Builder::new()
+        .filter_level(args.verbose.log_level_filter())
+        .init();
 
     info!("Starting up");
 
     let interface_map: HashMap<String, NetworkInterface> = get_interface_map();
 
     debug!("Found {} interfaces", interface_map.len());
-
-    let args = Args::parse();
 
     // TODO: Better error handling
 
