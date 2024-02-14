@@ -102,7 +102,9 @@ impl AddressFilter {
         // TODO: Check semantics of this.
         let res = !storm_check && (!in_block_net || in_allow_net);
 
-        trace!("Not transmitting packet from {:?}", socket_addr);
+        if !res {
+            trace!("Not transmitting packet from {:?}", socket_addr);
+        }
 
         res
     }
@@ -217,19 +219,26 @@ async fn main() -> io::Result<()> {
 
     let transmit_sock_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), TRANSMIT_PORT);
 
-    let transmit_sock_inner = UdpSocket::bind(transmit_sock_addr)
+    let transmit_sock = UdpSocket::bind(transmit_sock_addr)
         .await
         .expect("Could not bind transmit socket");
     info!("Transmitting on {:?}", transmit_sock_addr);
 
-    let transmit_sock = Arc::new(transmit_sock_inner);
+    let transmit_sock = Arc::new(transmit_sock);
 
     while let Ok((buf, _source_addr)) = rx.recv().await {
-        for transmit_address in transmit_addresses.as_slice() {
-            match transmit_sock.send_to(&buf, &transmit_address).await {
-                Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-                Err(_) => error!("Failed"),
-            };
+        let buf = Arc::new(buf);
+
+        for transmit_address in transmit_addresses.iter().cloned() {
+            let transmit_sock = transmit_sock.clone();
+            let buf = buf.clone();
+
+            tokio::spawn(async move {
+                match transmit_sock.send_to(&buf, &transmit_address).await {
+                    Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
+                    Err(_) => error!("Failed"),
+                };
+            });
         }
     }
 
