@@ -170,17 +170,17 @@ async fn main() -> io::Result<()> {
     let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
     trace!("Created broadcast channel");
 
+    // Set up incoming packet receivers. We bind a `UdpSocket` per-address in the
+    // `receive_addresses` collection. Note that the `tx` within the loop refers to the
+    // input-side of the `broadcast::channel` created above.
     for receive_address in receive_addresses {
         let tx = tx.clone();
+        let address_filter = address_filter.clone();
 
-        let sock = UdpSocket::bind(receive_address)
+        let receive_sock = UdpSocket::bind(receive_address)
             .await
             .expect("Error creating socket");
         info!("Listening on {:?}", receive_address);
-
-        let receive_sock = Arc::new(sock);
-
-        let address_filter = address_filter.clone();
 
         tokio::spawn(async move {
             loop {
