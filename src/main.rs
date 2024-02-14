@@ -39,19 +39,23 @@ struct Args {
 }
 
 fn get_interface_map() -> HashMap<String, NetworkInterface> {
-    NetworkInterface::show()
+    let interface_map: HashMap<String, NetworkInterface> = NetworkInterface::show()
         .unwrap()
         .iter()
         .map(|interface| (interface.name.to_string(), interface.clone()))
-        .collect()
+        .collect();
+
+    debug!("Found {} interfaces", interface_map.len());
+
+    interface_map
 }
 
 fn get_socket_addresses(
     interfaces: &Vec<String>,
     interface_map: &HashMap<String, NetworkInterface>,
     port: u16,
-) -> Vec<SocketAddrV4> {
-    interfaces
+) -> Option<Vec<SocketAddrV4>> {
+    let addrs: Vec<SocketAddrV4> = interfaces
         .iter()
         .filter_map(|interface_name| match interface_map.get(interface_name) {
             Some(NetworkInterface { addr, .. }) => Some(addr),
@@ -63,7 +67,12 @@ fn get_socket_addresses(
                 _ => None,
             })
         })
-        .collect()
+        .collect();
+
+    match addrs.len() {
+        0 => None,
+        _ => Some(addrs),
+    }
 }
 
 struct AddressFilter {
@@ -124,31 +133,29 @@ async fn main() -> io::Result<()> {
 
     let interface_map: HashMap<String, NetworkInterface> = get_interface_map();
 
-    debug!("Found {} interfaces", interface_map.len());
-
-    // TODO: Better error handling
-
     let receive_addresses =
-        get_socket_addresses(&args.receive_interfaces, &interface_map, args.port);
-    // TODO: read in transmit ports as well
+        match get_socket_addresses(&args.receive_interfaces, &interface_map, args.port) {
+            Some(addrs) => addrs,
+            None => {
+                error!(
+                    "No interfaces to receive from. Tried {:?}",
+                    &args.receive_interfaces
+                );
+                process::exit(1);
+            }
+        };
+
     let transmit_addresses =
-        get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port + 1);
-
-    if receive_addresses.len() == 0 {
-        error!(
-            "No interfaces to receive from. Tried {:?}",
-            &args.receive_interfaces
-        );
-        process::exit(1);
-    }
-
-    if transmit_addresses.len() == 0 {
-        error!(
-            "No interfaces to transmit to. Tried {:?}",
-            &args.transmit_interfaces
-        );
-        process::exit(1);
-    }
+        match get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port) {
+            Some(addrs) => addrs,
+            None => {
+                error!(
+                    "No interfaces to transmit to. Tried {:?}",
+                    &args.transmit_interfaces
+                );
+                process::exit(1);
+            }
+        };
 
     debug!("Receiving from {} interfaces", receive_addresses.len());
     debug!("Transmitting to {} interfaces", transmit_addresses.len());
