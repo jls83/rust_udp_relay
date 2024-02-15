@@ -11,10 +11,11 @@ use clap::Parser;
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
 use tokio::io;
 use tokio::net::UdpSocket;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 const BUFFER_SIZE: usize = 4096 + 20 + 8;
 const TRANSMIT_PORT: u16 = 58371;
+const CHANNEL_SIZE: usize = 2 << 7;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -121,6 +122,50 @@ impl AddressFilter {
     }
 }
 
+async fn transmit_handler(
+    rx: &mut Receiver<(Vec<u8>, SocketAddr)>,
+    transmit_sock: Arc<UdpSocket>,
+    transmit_address: &SocketAddrV4,
+) {
+    match rx.recv().await {
+        Ok((buf, _source_addr)) => match transmit_sock.send_to(&buf, &transmit_address).await {
+            Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
+            Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
+        },
+        Err(e) => {
+            // TODO: This isn't quite the correct error message.
+            // TODO: check for `Lagged` message
+            error!("Receive failed for {:?} {:?}", transmit_address, e);
+        }
+    }
+}
+
+async fn receive_handler(
+    tx: Sender<(Vec<u8>, SocketAddr)>,
+    receive_sock: Arc<UdpSocket>,
+    address_filter: Arc<AddressFilter>,
+) {
+    let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+    let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
+    debug!("Read {} bytes from {:?}", len, source_addr);
+
+    if let SocketAddr::V4(inner) = source_addr {
+        if address_filter.should_transmit(&inner) {
+            match tx.send((buf[..len].to_vec(), source_addr)) {
+                Ok(_) => trace!("Added packet to channel from {:?}", source_addr),
+                Err(e) => {
+                    warn!(
+                        "Error adding packet to channel from {:?} {:?}",
+                        source_addr, e
+                    );
+                }
+            }
+        }
+    } else {
+        trace!("Ignoring non-IPv4 packet from {}", source_addr);
+    }
+}
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args = Args::parse();
@@ -167,42 +212,27 @@ async fn main() -> io::Result<()> {
         AddressFilter::new(transmit_addresses_set, args.block_nets, args.allow_nets);
     let address_filter = Arc::new(address_filter);
 
-    let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(32);
+    // TODO: consider channel size here
+    let (tx, _rx) = broadcast::channel::<(Vec<u8>, SocketAddr)>(CHANNEL_SIZE);
     trace!("Created broadcast channel");
 
     // Set up incoming packet receivers. We bind a `UdpSocket` per-address in the
     // `receive_addresses` collection. Note that the `tx` within the loop refers to the
     // input-side of the `broadcast::channel` created above.
     for receive_address in receive_addresses {
-        let tx = tx.clone();
-        let address_filter = address_filter.clone();
-
         let receive_sock = UdpSocket::bind(receive_address)
             .await
             .expect("Error creating socket");
         info!("Listening on {:?}", receive_address);
 
-        tokio::spawn(async move {
-            loop {
-                let mut buf: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-                let (len, source_addr) = receive_sock.recv_from(&mut buf).await.unwrap();
-                debug!("Read {} bytes from {:?}", len, source_addr);
+        let receive_sock = Arc::new(receive_sock);
+        let tx = tx.clone();
+        let address_filter = address_filter.clone();
 
-                if let SocketAddr::V4(inner) = source_addr {
-                    if address_filter.should_transmit(&inner) {
-                        match tx.send((buf[..len].to_vec(), source_addr)) {
-                            Ok(_) => trace!("Added packet to channel from {:?}", source_addr),
-                            Err(e) => {
-                                warn!(
-                                    "Error adding packet to channel from {:?} {:?}",
-                                    source_addr, e
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    trace!("Ignoring non-IPv4 packet from {}", source_addr);
-                }
+        tokio::spawn(async move {
+            let tx = tx.clone();
+            loop {
+                receive_handler(tx.clone(), receive_sock.clone(), address_filter.clone()).await
             }
         });
     }
@@ -222,49 +252,21 @@ async fn main() -> io::Result<()> {
 
     let transmit_sock = Arc::new(transmit_sock);
 
-    // // 1. Initial impl: single subscription
-    // let mut rx = tx.subscribe();
-
-    // while let Ok((buf, _source_addr)) = rx.recv().await {
-    //     let buf = Arc::new(buf);
-
-    //     for transmit_address in transmit_addresses.iter().cloned() {
-    //         let transmit_sock = transmit_sock.clone();
-    //         let buf = buf.clone();
-
-    //         tokio::spawn(async move {
-    //             match transmit_sock.send_to(&buf, &transmit_address).await {
-    //                 Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-    //                 Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
-    //             };
-    //         });
-    //     }
-    // }
-
-    // 2. Second impl: multi-subscription, multi task
     for transmit_address in transmit_addresses.iter().cloned() {
         let mut rx = tx.subscribe();
         let transmit_sock = transmit_sock.clone();
 
         tokio::spawn(async move {
             loop {
-                if let Ok((buf, _source_addr)) = rx.recv().await {
-                    debug!("TODO: here");
-                    match transmit_sock.send_to(&buf, &transmit_address).await {
-                        Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-                        Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
-                    }
-                } else {
-                    // TODO: This isn't quite the correct error message.
-                    error!("Receive failed for {:?}", transmit_address);
-                }
+                transmit_handler(&mut rx, transmit_sock.clone(), &transmit_address).await
             }
         });
     }
 
-    // For version 1
-    // Ok(())
-
-    // For version 2
     loop {}
+}
+
+#[tokio::test]
+async fn blah() {
+    assert!(true);
 }
