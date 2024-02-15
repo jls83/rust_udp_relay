@@ -13,7 +13,7 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
-const BUFFER_SIZE: usize = 1024;
+const BUFFER_SIZE: usize = 4096 + 20 + 8;
 const TRANSMIT_PORT: u16 = 58371;
 
 #[derive(Parser, Debug)]
