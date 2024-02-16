@@ -190,17 +190,24 @@ async fn main() -> io::Result<()> {
             }
         };
 
-    let transmit_addresses =
-        match get_socket_addresses(&args.transmit_interfaces, &interface_map, args.port + 1) {
-            Some(addrs) => addrs,
-            None => {
-                error!(
-                    "No interfaces to transmit to. Tried {:?}",
-                    &args.transmit_interfaces
-                );
-                process::exit(1);
+    // TODO: Pull this from args
+    let transmit_ports: Vec<u16> = (1..3).map(|i| args.port + i).collect();
+
+    let transmit_addresses: Vec<SocketAddrV4> = transmit_ports
+        .iter()
+        .flat_map(|transmit_port| {
+            match get_socket_addresses(&args.transmit_interfaces, &interface_map, *transmit_port) {
+                Some(addrs) => addrs,
+                None => {
+                    error!(
+                        "No interfaces to transmit to. Tried {:?}",
+                        &args.transmit_interfaces
+                    );
+                    process::exit(1);
+                }
             }
-        };
+        })
+        .collect();
 
     debug!("Receiving from {} interfaces", receive_addresses.len());
     debug!("Transmitting to {} interfaces", transmit_addresses.len());
