@@ -11,7 +11,7 @@ use clap::Parser;
 use network_interface::{Addr, NetworkInterface, NetworkInterfaceConfig};
 use tokio::io;
 use tokio::net::UdpSocket;
-use tokio::sync::broadcast::{self, Receiver, Sender};
+use tokio::sync::broadcast::{self, Sender};
 
 const BUFFER_SIZE: usize = 4096 + 20 + 8;
 const TRANSMIT_PORT: u16 = 58371;
@@ -52,15 +52,16 @@ fn get_interface_map() -> HashMap<String, NetworkInterface> {
 }
 
 fn get_socket_addresses(
-    interfaces: &Vec<String>,
+    interfaces: &[String],
     interface_map: &HashMap<String, NetworkInterface>,
     port: u16,
 ) -> Option<Vec<SocketAddrV4>> {
     let addrs: Vec<SocketAddrV4> = interfaces
         .iter()
-        .filter_map(|interface_name| match interface_map.get(interface_name) {
-            Some(NetworkInterface { addr, .. }) => Some(addr),
-            None => None,
+        .filter_map(|interface_name| {
+            interface_map
+                .get(interface_name)
+                .map(|NetworkInterface { addr, .. }| addr)
         })
         .flat_map(|addrs| {
             addrs.iter().filter_map(|addr| match addr {
@@ -119,24 +120,6 @@ impl AddressFilter {
         }
 
         res
-    }
-}
-
-async fn transmit_handler(
-    rx: &mut Receiver<(Vec<u8>, SocketAddr)>,
-    transmit_sock: Arc<UdpSocket>,
-    transmit_address: &SocketAddrV4,
-) {
-    match rx.recv().await {
-        Ok((buf, _source_addr)) => match transmit_sock.send_to(&buf, &transmit_address).await {
-            Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
-            Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
-        },
-        Err(e) => {
-            // TODO: This isn't quite the correct error message.
-            // TODO: check for `Lagged` message
-            error!("Receive failed for {:?} {:?}", transmit_address, e);
-        }
     }
 }
 
@@ -213,7 +196,7 @@ async fn main() -> io::Result<()> {
     debug!("Transmitting to {} interfaces", transmit_addresses.len());
 
     let transmit_addresses_set: HashSet<SocketAddrV4> =
-        HashSet::from_iter(transmit_addresses.clone());
+        HashSet::from_iter(transmit_addresses.iter().cloned());
 
     let address_filter =
         AddressFilter::new(transmit_addresses_set, args.block_nets, args.allow_nets);
@@ -258,19 +241,32 @@ async fn main() -> io::Result<()> {
     info!("Transmitting on {:?}", transmit_sock_addr);
 
     let transmit_sock = Arc::new(transmit_sock);
+    let transmit_addresses = Arc::new(transmit_addresses);
 
-    for transmit_address in transmit_addresses.iter().cloned() {
-        let mut rx = tx.subscribe();
-        let transmit_sock = transmit_sock.clone();
+    let mut rx = tx.subscribe();
 
-        tokio::spawn(async move {
-            loop {
-                transmit_handler(&mut rx, transmit_sock.clone(), &transmit_address).await
+    loop {
+        match rx.recv().await {
+            Ok((buf, _source_addr)) => {
+                let transmit_sock = transmit_sock.clone();
+                let transmit_addresses = transmit_addresses.clone();
+
+                tokio::spawn(async move {
+                    for transmit_address in transmit_addresses.iter() {
+                        match transmit_sock.send_to(&buf, transmit_address).await {
+                            Ok(n) => debug!("Sent {n} bytes to {transmit_address}"),
+                            Err(e) => error!("Send failed to {:?}, {:?}", transmit_address, e),
+                        }
+                    }
+                });
             }
-        });
+            Err(e) => {
+                // TODO: This isn't quite the correct error message.
+                // TODO: check for `Lagged` message
+                error!("Receive failed: {:?}", e);
+            }
+        }
     }
-
-    loop {}
 }
 
 #[tokio::test]
