@@ -13,6 +13,9 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast::{self, Sender};
 
+mod address_filter;
+use address_filter::AddressFilter;
+
 const BUFFER_SIZE: usize = 4096 + 20 + 8;
 const TRANSMIT_PORT: u16 = 58371;
 const CHANNEL_SIZE: usize = 2 << 7;
@@ -74,52 +77,6 @@ fn get_socket_addresses(
     match addrs.len() {
         0 => None,
         _ => Some(addrs),
-    }
-}
-
-struct AddressFilter {
-    transmit_addresses_set: HashSet<SocketAddrV4>,
-    block_nets: Vec<Ipv4Net>,
-    allow_nets: Vec<Ipv4Net>,
-}
-
-impl AddressFilter {
-    fn new(
-        transmit_addresses_set: HashSet<SocketAddrV4>,
-        block_nets: Vec<Ipv4Net>,
-        allow_nets: Vec<Ipv4Net>,
-    ) -> Self {
-        // TODO: only log if non-zero?
-        debug!("Blocking packets from {} subnets", block_nets.len());
-        debug!("Allowing packets from {} subnets", allow_nets.len());
-        Self {
-            transmit_addresses_set,
-            block_nets,
-            allow_nets,
-        }
-    }
-
-    fn should_transmit(&self, socket_addr: &SocketAddrV4) -> bool {
-        let storm_check = self.transmit_addresses_set.contains(socket_addr);
-
-        let in_block_net = self
-            .block_nets
-            .iter()
-            .any(|net| net.contains(socket_addr.ip()));
-
-        let in_allow_net = self
-            .allow_nets
-            .iter()
-            .any(|net| net.contains(socket_addr.ip()));
-
-        // TODO: Check semantics of this.
-        let res = !storm_check && (!in_block_net || in_allow_net);
-
-        if !res {
-            trace!("Not transmitting packet from {:?}", socket_addr);
-        }
-
-        res
     }
 }
 
